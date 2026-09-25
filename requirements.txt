@@ -1,0 +1,2 @@
+# Stdlib only - no third-party dependencies.
+# tapas_backup.py runs on bare Python 3.8+ using urllib.request + regex.
