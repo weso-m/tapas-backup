@@ -5,19 +5,16 @@ comments and replies, images included — as files on your computer.
 
 ## What you need
 
-- A computer and an internet connection.
-- **Python 3** — a free program this tool runs on. Download it from
-  <https://www.python.org/downloads/> and run the installer.
-  **Windows:** on the installer's very first screen, tick the box that says
-  **"Add python.exe to PATH"** before clicking Install. If you miss it,
-  just re-run the installer and tick it.
-- This folder: download or copy it somewhere you can find again (for
-  example your Desktop) and unzip it if it came as a zip.
+- **Python 3** — free, from <https://www.python.org/downloads/>.
+  **Windows:** tick **"Add python.exe to PATH"** on the installer's first
+  screen (if you miss it, re-run the installer and tick it).
+- This folder, somewhere you can find it again (unzip it first if it
+  came as a zip).
 
 ## Find your series link
 
-Open your series page in your browser (the page people read your series
-on). Copy the address straight from the address bar, for example:
+Open your series page in your browser and copy the address from the
+address bar, for example:
 
 ```
 https://tapas.io/series/Your-Series-Name
@@ -29,33 +26,26 @@ A mobile link works too, e.g. `https://m.tapas.io/series/Your-Series-Name`
 
 ## Run it
 
-1. Open a terminal:
-   **Windows:** press the **Windows key**, type `cmd`, press **Enter**.
-   (Mac: open the Terminal app. Linux: any terminal.)
-2. Point the terminal at the folder you downloaded, by typing `cd`
-   followed by a space and the folder's path, then press Enter. For
-   example, if you unzipped it to your Desktop:
+1. Open a terminal (Windows: press Win, type `cmd`, Enter; Mac/Linux:
+   any terminal).
+2. Point it at the folder you downloaded, e.g. if it's on your Desktop:
 
    ```
    cd C:\Users\yourname\Desktop\tapas-backup
    ```
 
-   Tip: in Windows you can also type `cd ` (with the trailing space) and
-   then drag the folder from Explorer into the black window — the path
-   types itself.
 3. Copy, paste and run this line (put your link between the quotes):
 
    ```
    python tapas_backup.py --series "https://tapas.io/series/Your-Series-Name" --out my-backup
    ```
 
-**What success looks like:** you'll see progress lines for each episode
-(`[ep 1] id 12345: fetching...` and `[ep 1] done`), then a final
+**What success looks like:** progress lines for each episode
+(`[ep 1] id 12345: fetching...` then `[ep 1] done`), then a final
 `== summary ==` block. Small series finish in a few minutes; hundreds of
 episodes can take an hour or more (the tool pauses briefly between
-requests to be polite to the site). There should be no
-`gaps recorded` surprise — see the line `gaps recorded: 0` in the summary;
-if it's higher, open `gaps.txt` in the output folder to see why.
+requests). Check `gaps recorded: 0` in the summary — if it's higher, open
+`gaps.txt` in the output folder to see why.
 
 If something goes wrong instead, see **Technical reference** below.
 
@@ -356,16 +346,3 @@ All requests go through one global limiter: default **2 req/s with jitter**,
 exponential backoff (max 4 tries per URL) on HTTP 429/5xx, timeouts and network
 errors. The limit applies across all phases (series → list → episodes →
 comments → replies). Retries are also counted and reported in the run summary.
-
-## Run it soon
-
-Tapas.io is shutting down. This script was verified against the live site on
-2026-09-24 with a limited run (`--episode-range 1-3 --limit-comments-pages 4`)
-plus resume testing; the full archive is one command:
-
-```bash
-python tapas_backup.py --series "https://tapas.io/series/Your-Series-Name" --out archive
-```
-
-Keep the `archive/` directory backed up (it contains everything: prose,
-base64 story images, all comments and replies).
