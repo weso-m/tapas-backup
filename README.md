@@ -1,33 +1,132 @@
 # tapas-backup
 
-One-shot archival backup for a Tapas.io series — **novels AND comics**. Every
-episode's article HTML (novel prose + inline base64 story images; comic panels
-downloaded from their signed CDN URLs, validated and localized) plus **all
-reader comments and every reply** in every comment thread.  **
+Backs up everything you posted on a Tapas series — every episode, all
+comments and replies, images included — as files on your computer.
 
-Stdlib only. Python 3.8+ (developed on 3.11). No `pip install`, no third-party
-deps — runs on bare `python`.
+## What you need
 
-## Run
+- A computer and an internet connection.
+- **Python 3** — a free program this tool runs on. Download it from
+  <https://www.python.org/downloads/> and run the installer.
+  **Windows:** on the installer's very first screen, tick the box that says
+  **"Add python.exe to PATH"** before clicking Install. If you miss it,
+  just re-run the installer and tick it.
+- This folder: download or copy it somewhere you can find again (for
+  example your Desktop) and unzip it if it came as a zip.
 
-```bash
-cd tapas-backup
-python tapas_backup.py --series 123456 --out archive
+## Find your series link
+
+Open your series page in your browser (the page people read your series
+on). Copy the address straight from the address bar, for example:
+
+```
+https://tapas.io/series/Your-Series-Name
 ```
 
-Resume after an interruption by re-running the **same command**: completed
-episodes are skipped (manifest-driven), only the remainder is fetched.
+That link is all the tool needs — you'll paste it into the command below.
+A mobile link works too, e.g. `https://m.tapas.io/series/Your-Series-Name`
+— either form is fine.
 
-Full 862-episode archive: observed ~6-7 comment pages/episode on early eps →
-roughly `862 info + 862 article + 44 list + ~6k comment pages + reply pages
-≈ 8-10k requests ≈ 1.5-2 h` at the default 2 req/s.  
+## Run it
+
+1. Open a terminal:
+   **Windows:** press the **Windows key**, type `cmd`, press **Enter**.
+   (Mac: open the Terminal app. Linux: any terminal.)
+2. Point the terminal at the folder you downloaded, by typing `cd`
+   followed by a space and the folder's path, then press Enter. For
+   example, if you unzipped it to your Desktop:
+
+   ```
+   cd C:\Users\yourname\Desktop\tapas-backup
+   ```
+
+   Tip: in Windows you can also type `cd ` (with the trailing space) and
+   then drag the folder from Explorer into the black window — the path
+   types itself.
+3. Copy, paste and run this line (put your link between the quotes):
+
+   ```
+   python tapas_backup.py --series "https://tapas.io/series/Your-Series-Name" --out my-backup
+   ```
+
+**What success looks like:** you'll see progress lines for each episode
+(`[ep 1] id 12345: fetching...` and `[ep 1] done`), then a final
+`== summary ==` block. Small series finish in a few minutes; hundreds of
+episodes can take an hour or more (the tool pauses briefly between
+requests to be polite to the site). There should be no
+`gaps recorded` surprise — see the line `gaps recorded: 0` in the summary;
+if it's higher, open `gaps.txt` in the output folder to see why.
+
+If something goes wrong instead, see **Technical reference** below.
+
+## Where your backup is / what you get
+
+The `--out my-backup` part of the command chose the folder name. Inside it
+you'll find:
+
+```
+my-backup/
+  series.json                  info about the series
+  episodes/
+    0001-123456/               one folder per episode, in reading order
+      index.json               episode details (title, date, ...)
+      article.html             the episode text  (open it in a browser)
+      comments.json            the comments on that episode
+      images/                  comic episodes only: the panel images
+      images.json              comic episodes only: list of those images
+  gaps.txt                     any episodes that could not be saved, and why
+```
+
+`article.html` is the episode itself — double-click it to read it.
+`comments.json` holds the comments and their replies as text.
+`gaps.txt` lists anything that could not be downloaded (empty is good).
+
+**Copy the folder somewhere safe (USB stick, cloud drive, second computer).
+A backup that lives in one place is not a backup yet.**
+
+## Some of my episodes are locked
+
+Some episodes may be behind Tapas's early-access or supporter-only
+paywall. Without signing in, the tool cannot read the text of those
+locked episodes — it still saves their comments, and it lists each locked
+episode in `gaps.txt` so nothing is silently missing. If that applies to
+your series, see `--cookie` in the **Technical reference** below to fetch
+them while signed in.
+
+## If something goes wrong
+
+- **`python` is not recognized** — Python wasn't added to PATH. Re-run the
+  Python installer and tick "Add python.exe to PATH", or try `py` instead
+  of `python`.
+- **`--series` is required** — you forgot the part after `--series`. Put
+  your series link in quotes right after it.
+- **Could not find the numeric series id** — the link is wrong or the
+  series is private. Open the link in a browser to check it loads.
+- Interrupted? Just run the **same command again** — finished episodes are
+  skipped and only the rest is downloaded.
+
+---
+
+# Technical reference
+
+*Everything below is detail for the curious — you never need it to make a
+backup.*
+
+One-shot archival backup for a Tapas.io series — **novels AND comics**.
+Every episode's article HTML (novel prose + inline base64 story images;
+comic panels downloaded from their signed CDN URLs, validated and
+localized) plus **all reader comments and every reply** in every comment
+thread.
+
+Stdlib only. Python 3.8+ (developed on 3.11). No `pip install`, no
+third-party deps — runs on bare `python`.
 
 ## CLI options
 
 | Option | Default | Meaning |
 |---|---|---|
-| `--series` | (required) | series id, e.g. `123456` for *My Series* |
-| `--out DIR` | `tapas-archive-<series>` | output directory (created if missing) |
+| `--series` | (required) | series id (e.g. `123456`), series slug (e.g. `My-Series`) or full series URL: `https://tapas.io/series/My-Series`, `https://tapas.io/series/My-Series/info`, `https://m.tapas.io/series/My-Series`, `https://m.tapas.io/series/My-Series/info` — URLs and slugs are resolved to the numeric id by fetching the series page once (`[series] resolved <slug> -> id <n>`) |
+| `--out DIR` | `tapas-archive-<series id>` | output directory (created if missing; derived from the resolved numeric id, so id/slug/URL forms of the same series share one dir) |
 | `--cookie STR` | none | raw `Cookie` header for signed-in fetches (not needed; series is free) |
 | `--episode-range N` / `N-M` | all | 1-based episode numbers in OLDEST order |
 | `--limit-episodes N` | all | process at most N episodes from the start of the range |
@@ -41,6 +140,52 @@ roughly `862 info + 862 article + 44 list + ~6k comment pages + reply pages
 | `--force` | off | re-fetch completed episodes too (otherwise resume skips them) |
 | `--selftest` | — | run parser unit tests (fixtures captured from live tapas.io) and exit |
 
+```bash
+python tapas_backup.py --series 123456 --out archive
+python tapas_backup.py --series "https://tapas.io/series/My-Series" --out archive
+python tapas_backup.py --series My-Series --out archive --episode-range 1-3 \
+    --limit-comments-pages 4
+```
+
+Resume after an interruption by re-running the **same command**: completed
+episodes are skipped (manifest-driven), only the remainder is fetched.
+
+Full 862-episode archive: observed ~6-7 comment pages/episode on early eps →
+roughly `862 info + 862 article + 44 list + ~6k comment pages + reply pages
+≈ 8-10k requests ≈ 1.5-2 h` at the default 2 req/s.  
+
+### Series URL/slug resolution
+
+`--series` accepts three kinds of value:
+
+1. **All digits** (e.g. `123456`) — used as the numeric series id directly,
+   no extra request, identical to before.
+2. **Series URL** — `https://tapas.io/series/<slug>`,
+   `https://tapas.io/series/<slug>/info`, `https://m.tapas.io/series/<slug>`
+   or `https://m.tapas.io/series/<slug>/info` (also with `www.` or no
+   scheme, or a trailing slash). The slug is stripped from the URL.
+3. **Bare slug** — `My-Series`.
+
+For a slug, the script GETs `https://tapas.io/series/<slug>` as plain HTML
+and extracts the numeric series id, trying several patterns in order —
+first match wins:
+
+1. `tapastic://series/(\d+)` — the app deep-link meta tags; they describe
+   this page's own series.
+2. `data-series-id="(\d+)"` — first occurrence.
+3. `data-tiara-event-meta-series-id="(\d+)"`.
+4. `series/(\d+)/episodes` — episode-list links.
+5. `/series/(\d+)`.
+
+Pattern order matters (verified against a live series page 2026-09-25):
+the **first** `data-tiara-event-meta-series-id` on a series page belongs to
+a *recommended* series in the page's sidebar, not the page's own series,
+so it can only be a fallback; the `tapastic://` deep links and the ad-slot
+`data-series-id` attributes always name the page's own series. If no
+pattern matches (missing/private series, changed layout), the run fails
+with a clear error. Resolution is logged as
+`[series] resolved <slug> -> id <n>`.
+
 ## Output layout
 
 ```
@@ -52,9 +197,9 @@ roughly `862 info + 862 article + 44 list + ~6k comment pages + reply pages
     index.json                     episode info JSON
     article.html                   verbatim <article> element (prose + inline base64 images;
                                     comic episodes: panels localized to images/panel-NNN.ext)
-    images/                         comic episodes only: downloaded panel images
+    images/                        comic episodes only: downloaded panel images
       panel-001.png ...            one file per panel, in document order
-    images.json                     comic episodes only: per-panel provenance (see below)
+    images.json                    comic episodes only: per-panel provenance (see below)
     comments.json                  array of comments, each with a nested replies array
 ```
 
@@ -137,7 +282,8 @@ comments are still archived (comments stay public on locked episodes).
 1. **Series meta** — `GET https://tapas.io/series/123456`
    With `Accept: application/json` + `X-Requested-With: XMLHttpRequest` → JSON
    `{code:200, data:{id, title, url, thumb_url, type:"COMMUNITY_BOOKS", book:true, genre, thumbsup_cnt, ...}}`.
-   Without those headers it's an HTML page.
+   Without those headers it's an HTML page — this same HTML page is what the
+   URL/slug resolution reads the numeric id from.
 
 2. **Episode list** — `GET https://tapas.io/series/123456/episodes?eid=1701734&page=1&sort=OLDEST&last_access=0&max_limit=20`
    → JSON `{code, data:{pagination:{page, has_next, total:862, max_limit:20}, body:"<li ... data-href=\"/episode/<id>\" ...>"}}`.
@@ -218,7 +364,7 @@ Tapas.io is shutting down. This script was verified against the live site on
 plus resume testing; the full archive is one command:
 
 ```bash
-python tapas_backup.py --series 123456 --out archive
+python tapas_backup.py --series "https://tapas.io/series/Your-Series-Name" --out archive
 ```
 
 Keep the `archive/` directory backed up (it contains everything: prose,

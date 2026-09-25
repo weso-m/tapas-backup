@@ -1,0 +1,15 @@
+# local archives / test output - never commit reader or friend content
+archive/
+archive-comic-test/
+archive-url-test/
+archive-url-test-m/
+tapas-archive-*/
+full_run.log
+*.zip
+
+# python
+__pycache__/
+*.pyc
+
+# credentials
+.gh_tok

@@ -49,8 +49,13 @@ Endpoints (all verified anonymously, 2026-09-24):
 
 Usage:
   python tapas_backup.py --series 123456 --out archive
-  python tapas_backup.py --series 123456 --out archive --episode-range 1-3 \
+  python tapas_backup.py --series "https://tapas.io/series/My-Series" --out archive
+  python tapas_backup.py --series My-Series --out archive --episode-range 1-3 \
       --limit-comments-pages 4
+
+--series accepts a numeric series id, a series URL (tapas.io or m.tapas.io,
+optionally with a trailing /info) or a bare slug; URLs and slugs are resolved
+to the numeric id by fetching the series page once ([series] resolved ...).
 """
 
 import argparse
@@ -647,6 +652,104 @@ def fetch_replies(fetcher, ep_id, comment_id, limit_pages=None):
 
 
 # --------------------------------------------------------------------------
+# Series arg resolution (--series: numeric id | series URL | slug)
+# --------------------------------------------------------------------------
+
+# Matches a tapas series URL in any of its forms and captures the slug:
+#   https://tapas.io/series/<slug>          https://tapas.io/series/<slug>/info
+#   https://m.tapas.io/series/<slug>        https://m.tapas.io/series/<slug>/info
+# Trailing slashes and /info are excluded by the capture ([^/?#\s]+ stops
+# at the first slash). Scheme and www. are optional.
+SERIES_URL_RE = re.compile(
+    r"(?:https?://)?(?:www\.)?(?:m\.)?tapas\.io/series/([^/?#\s]+)",
+    re.IGNORECASE)
+
+# A bare slug: letters/digits first, then the chars tapas slugs are built from.
+SLUG_OK_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._~-]*$")
+
+
+def series_slug_from_arg(value):
+    """The series slug inside a --series value, or None if none can be found.
+
+    A series URL is stripped to its slug (any /info suffix or trailing slash
+    dropped); anything else without a slash is treated as a bare slug."""
+    v = (value or "").strip()
+    m = SERIES_URL_RE.search(v)
+    if m:
+        slug = urllib.parse.unquote(m.group(1))
+    elif v and "/" not in v and ":" not in v:
+        slug = v
+    else:
+        return None
+    return slug if SLUG_OK_RE.match(slug) else None
+
+
+# Id-extraction patterns for a series page (plain HTML), tried in order; the
+# first pattern that matches anywhere wins. Order matters: the tapastic://
+# app deep-link meta tags and the first data-series-id describe THIS page's
+# series, while data-tiara-event-meta-series-id and the /series/<id>/
+# episode-list link can also appear on recommendation cards pointing at
+# OTHER series, so they are only fallbacks (verified live 2026-09-25: on a
+# real series page the first tiara match is a recommended series, not the
+# page's own).
+SERIES_ID_PATTERNS = (
+    r"tapastic://series/(\d+)",
+    r'data-series-id="(\d+)"',
+    r'data-tiara-event-meta-series-id="(\d+)"',
+    r"series/(\d+)/episodes",
+    r"/series/(\d+)",
+)
+
+
+def extract_series_id_from_series_html(page_html):
+    """Numeric series id from a series page's HTML, or None."""
+    for pat in SERIES_ID_PATTERNS:
+        m = re.search(pat, page_html or "")
+        if m:
+            return m.group(1)
+    return None
+
+
+def resolve_series_arg(value, fetcher):
+    """Resolve --series to the numeric series id.
+
+    All digits -> used as-is (byte-identical behavior, no network). Anything
+    else is stripped to its slug, the series page is fetched as plain HTML
+    and the numeric id is extracted from it. Raises FetchError with a
+    plain-language message when the value is unusable or the page hides the
+    id (missing/private series, changed layout)."""
+    v = (value or "").strip()
+    if not v:
+        raise FetchError("--series is empty; pass the numeric series id, the "
+                         "series slug, or the series page URL "
+                         "(https://tapas.io/series/Your-Series)")
+    if v.isdigit():
+        return v
+    slug = series_slug_from_arg(v)
+    if slug is None:
+        raise FetchError(
+            "--series %r does not look like a series: pass the numeric series "
+            "id, the series slug, or the full series page URL, e.g. "
+            "https://tapas.io/series/Your-Series (or the same link on "
+            "https://m.tapas.io/)" % (value,))
+    if slug.isdigit():        # e.g. someone pasted .../series/123456
+        return slug
+    url = "%s/series/%s" % (BASE, urllib.parse.quote(slug))
+    log("[series] resolving series link %r (looking up %s)..." % (value, url))
+    page_html = fetcher.get(url)
+    sid = extract_series_id_from_series_html(page_html)
+    if not sid:
+        raise FetchError(
+            "could not find the numeric series id on the series page for %r "
+            "(%s). The series may not exist or may be private, the site layout "
+            "may have changed, or the page may require sign-in. Check the link "
+            "in a browser and try again, or pass the numeric series id directly."
+            % (slug, url))
+    log("[series] resolved %s -> id %s" % (slug, sid))
+    return sid
+
+
+# --------------------------------------------------------------------------
 # Manifest
 # --------------------------------------------------------------------------
 
@@ -902,10 +1005,18 @@ def parse_range(spec):
 
 
 def run(args):
-    out = os.path.abspath(args.out)
-    os.makedirs(out, exist_ok=True)
     fetcher = Fetcher(rate=args.rate, max_tries=args.max_tries,
                       timeout=args.timeout, cookie=args.cookie)
+    # Accept a numeric id, a series URL or a bare slug; URLs/slugs are
+    # resolved to the numeric id here (one HTML fetch), and everything
+    # downstream only ever sees the id.
+    args.series = resolve_series_arg(args.series, fetcher)
+    if args.out is None:
+        # Default derived from the RESOLVED id, so an id, a slug and a URL
+        # for the same series all default to the same output directory.
+        args.out = "tapas-archive-%s" % args.series
+    out = os.path.abspath(args.out)
+    os.makedirs(out, exist_ok=True)
     manifest = load_manifest(out, args.series)
 
     # 1. series meta
@@ -1326,6 +1437,78 @@ def selftest():
     finally:
         shutil.rmtree(_sd, ignore_errors=True)
 
+    # ---- --series: URL/slug stripping (no network) ----
+    check("series: numeric id used as-is",
+          resolve_series_arg("123456", None) == "123456")
+    check("series: bare slug", series_slug_from_arg("My-Series") == "My-Series")
+    check("series: tapas.io URL", series_slug_from_arg("https://tapas.io/series/My-Series") == "My-Series")
+    check("series: tapas.io URL + /info",
+          series_slug_from_arg("https://tapas.io/series/My-Series/info") == "My-Series")
+    check("series: m.tapas.io URL", series_slug_from_arg("https://m.tapas.io/series/My-Series") == "My-Series")
+    check("series: m.tapas.io URL + /info",
+          series_slug_from_arg("https://m.tapas.io/series/My-Series/info") == "My-Series")
+    check("series: trailing slash",
+          series_slug_from_arg("https://tapas.io/series/My-Series/") == "My-Series")
+    check("series: slug with dots kept",
+          series_slug_from_arg("https://m.tapas.io/series/My.Series_2/info") == "My.Series_2")
+    check("series: non-series URL rejected",
+          series_slug_from_arg("https://example.com/series/My-Series") is None)
+    check("series: episode URL rejected",
+          series_slug_from_arg("https://tapas.io/episode/12345") is None)
+    check("series: empty rejected", series_slug_from_arg("") is None)
+
+    class _StubFetcher:
+        """Records fetched URLs; serves canned HTML keyed by the slug."""
+        def __init__(self, pages):
+            self.pages = pages          # slug -> html
+            self.fetched = []
+
+        def get(self, url, **kw):
+            self.fetched.append(url)
+            slug = url.rsplit("/series/", 1)[-1]
+            if slug in self.pages:
+                return self.pages[slug]
+            raise FetchError("HTTP 404 (non-retryable) for %s" % url)
+
+    # slug -> id resolution against a synthetic series page. Pattern order
+    # matters: the tiara id of a RECOMMENDED series appears before the page's
+    # own series id, so tapastic:// and data-series-id must win.
+    _page = (
+        "<html><head>"
+        '<meta name="twitter:app:url:googleplay" content="tapastic://series/234567">'
+        '<meta property="al:ios:url" content="tapastic://series/234567" />'
+        "</head><body>"
+        '<div data-fb-event="SeriesClick" data-series-id="234567"></div>'
+        '<a class="series-item js-lucky-item" data-series-id="234567"></a>'
+        '<li data-tiara-event-meta-series-id="999111" data-series-title="Other"></li>'
+        '<script src="/series/234567/episodes"></script>'
+        "</body></html>")
+    _sf = _StubFetcher({"My-Series": _page})
+    check("series: resolve slug -> id",
+          resolve_series_arg("My-Series", _sf) == "234567")
+    check("series: resolve URL -> id (m.tapas.io + /info)",
+          resolve_series_arg("https://m.tapas.io/series/My-Series/info", _sf) == "234567")
+    check("series: each resolution fetches the slug page once",
+          _sf.fetched == [BASE + "/series/My-Series"] * 2
+          or len(_sf.fetched) == 2)
+    check("series: extraction prefers tapastic:// over later tiara id",
+          extract_series_id_from_series_html(_page) == "234567")
+    check("series: extraction falls back to data-series-id",
+          extract_series_id_from_series_html('<div data-series-id="345678"></div>') == "345678")
+    check("series: extraction falls back to tiara meta",
+          extract_series_id_from_series_html('<li data-tiara-event-meta-series-id="456789"></li>') == "456789")
+    check("series: extraction falls back to series/N/episodes",
+          extract_series_id_from_series_html('<script src="/series/567890/episodes"></script>') == "567890")
+    check("series: extraction: no id -> None",
+          extract_series_id_from_series_html("<html><body>nothing here</body></html>") is None)
+    # a page that hides the id must raise a clear error
+    _bad = _StubFetcher({"Missing": "<html><body>404-ish</body></html>"})
+    try:
+        resolve_series_arg("Missing", _bad)
+        check("series: unresolvable slug raises FetchError", False)
+    except FetchError:
+        check("series: unresolvable slug raises FetchError", True)
+
     failed = [n for n, ok in checks if not ok]
     log("")
     log("SELFTEST: %d/%d passed%s" % (len(checks) - len(failed), len(checks),
@@ -1340,7 +1523,8 @@ def main(argv=None):
     except Exception:
         pass
     p = argparse.ArgumentParser(description="Archive a Tapas.io series: episodes, comments, replies.")
-    p.add_argument("--series", help="series id, e.g. 123456")
+    p.add_argument("--series", help="series numeric id, or series slug, or full series page URL "
+                                    "(e.g. https://tapas.io/series/Your-Series)")
     p.add_argument("--out", default=None, help="output directory (default: tapas-archive-<series>)")
     p.add_argument("--cookie", default=None, help="optional Cookie header string for signed-in access")
     p.add_argument("--episode-range", default=None,
@@ -1364,10 +1548,17 @@ def main(argv=None):
     if args.selftest:
         return selftest()
     if not args.series:
-        p.error("--series is required (e.g. --series 123456)")
-    if args.out is None:
-        args.out = "tapas-archive-%s" % args.series
-    return run(args)
+        p.error("--series is required (numeric id, series slug, or series URL)")
+    # NOTE: the default --out is computed inside run(), AFTER --series has
+    # been resolved to the numeric id, so an id, a slug and a URL for the
+    # same series all default to the same output directory.
+    try:
+        return run(args)
+    except FetchError as e:
+        # expected failures (bad --series value, unresolvable link, dead
+        # network, site down): one plain-language line, no traceback
+        log("[error] %s" % e)
+        return 1
 
 
 if __name__ == "__main__":
